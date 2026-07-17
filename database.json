@@ -1,0 +1,18 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "fullName": "John Mkuu",
+      "email": "mkuu@shule.com",
+      "password": "$2a$10$FHnAZggkKx1eMNYGasJp2eSKjefjacjK6VdqTPqElAh8EwX8af0iu",
+      "role": "head_teacher",
+      "createdAt": "2026-07-17T20:09:45.958Z"
+    }
+  ],
+  "students": [],
+  "attendances": [],
+  "marks": [],
+  "fees": [],
+  "homeworks": [],
+  "announcements": []
+}
