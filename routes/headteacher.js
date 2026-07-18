@@ -31,6 +31,31 @@ router.post('/students', async (req, res) => {
   }
 });
 
+// Ona wanafunzi wote (kwa ajili ya Simamia Wanafunzi)
+router.get('/students', async (req, res) => {
+  const students = await Student.findAll();
+  res.json(students);
+});
+
+// Takwimu za jumla za shule (kwa ajili ya Analytics)
+router.get('/reports/overview', async (req, res) => {
+  const users = await User.findAll();
+  const students = await Student.findAll();
+  const announcements = await Announcement.findAll();
+
+  const teachersCount = users.filter((u) => u.role === 'teacher').length;
+  const parentsCount = users.filter((u) => u.role === 'parent').length;
+  const pendingAnnouncements = announcements.filter((a) => a.status === 'pending').length;
+
+  res.json({
+    totalStudents: students.length,
+    totalTeachers: teachersCount,
+    totalParents: parentsCount,
+    totalAnnouncements: announcements.length,
+    pendingAnnouncements,
+  });
+});
+
 // Ripoti ya ada - jumla ya madeni na malipo
 router.get('/reports/fees', async (req, res) => {
   const fees = await Fee.findAll();
