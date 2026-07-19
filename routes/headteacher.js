@@ -7,6 +7,7 @@ const Fee = require('../models/Fee');
 const Announcement = require('../models/Announcement');
 
 const ClassAssignment = require('../models/ClassAssignment');
+const sendPushNotification = require('../utils/sendPushNotification');
 
 router.use(authenticate, authorize('head_teacher'));
 
@@ -132,6 +133,26 @@ router.put('/announcements/:id/status', async (req, res) => {
   try {
     const { status } = req.body; // 'approved' au 'rejected'
     await Announcement.update({ status }, { where: { id: req.params.id } });
+
+    if (status === 'approved') {
+      const announcement = await Announcement.findByPk(req.params.id);
+      const users = await User.findAll();
+      let targetParents = users.filter((u) => u.role === 'parent');
+
+      // Kama tangazo ni la darasa maalum, tuma tu kwa wazazi wa darasa hilo
+      if (announcement.className) {
+        const students = await Student.findAll({ where: { className: announcement.className } });
+        const parentIds = students.map((s) => s.parentId);
+        targetParents = targetParents.filter((p) => parentIds.includes(p.id));
+      }
+
+      targetParents.forEach((parent) => {
+        if (parent.pushToken) {
+          sendPushNotification(parent.pushToken, announcement.title, announcement.message, { type: 'announcement' });
+        }
+      });
+    }
+
     res.json({ message: `Tangazo limekuwa ${status}.` });
   } catch (err) {
     res.status(500).json({ error: err.message });

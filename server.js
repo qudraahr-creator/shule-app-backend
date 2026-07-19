@@ -6,6 +6,7 @@ const authRoutes = require('./routes/auth');
 const parentRoutes = require('./routes/parent');
 const teacherRoutes = require('./routes/teacher');
 const headTeacherRoutes = require('./routes/headteacher');
+const messagesRoutes = require('./routes/messages');
 
 const app = express();
 
@@ -20,6 +21,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/parent', parentRoutes);
 app.use('/api/teacher', teacherRoutes);
 app.use('/api/head', headTeacherRoutes);
+app.use('/api', messagesRoutes);
 
 const PORT = process.env.PORT || 5000;
 
