@@ -6,20 +6,45 @@ const Attendance = require('../models/Attendance');
 const Marks = require('../models/Marks');
 const Homework = require('../models/Homework');
 const Announcement = require('../models/Announcement');
+const ClassAssignment = require('../models/ClassAssignment');
 
 router.use(authenticate, authorize('teacher'));
 
+// Hakikisha mwalimu huyu ndiye aliyeteuliwa kwa darasa hili
+async function verifyClassOwnership(className, teacherId) {
+  const assignment = await ClassAssignment.findOne({ where: { className } });
+  if (!assignment) {
+    return { allowed: false, reason: 'Darasa hili halijapewa mwalimu bado. Mwombe Mkuu wa Shule akuteue.' };
+  }
+  if (assignment.teacherId !== teacherId) {
+    return { allowed: false, reason: 'Wewe si mwalimu wa darasa hili.' };
+  }
+  return { allowed: true };
+}
+
+// Ona darasa/madarasa niliyoteuliwa (kwa ajili ya frontend kuonyesha chaguo)
+router.get('/my-classes', async (req, res) => {
+  const assignments = await ClassAssignment.findAll({ where: { teacherId: req.user.id } });
+  res.json(assignments.map((a) => a.className));
+});
+
 // Ona wanafunzi wa darasa fulani
 router.get('/class/:className/students', async (req, res) => {
+  const check = await verifyClassOwnership(req.params.className, req.user.id);
+  if (!check.allowed) return res.status(403).json({ error: check.reason });
+
   const students = await Student.findAll({ where: { className: req.params.className } });
   res.json(students);
 });
 
 // Sajili mahudhurio (bulk kwa darasa zima)
-// Mfano wa body: { records: [{ studentId: 1, date: '2026-07-17', status: 'present' }, ...] }
+// Mfano wa body: { className: 'Darasa la 5', records: [{ studentId: 1, date: '2026-07-17', status: 'present' }, ...] }
 router.post('/attendance', async (req, res) => {
   try {
-    const { records } = req.body;
+    const { className, records } = req.body;
+    const check = await verifyClassOwnership(className, req.user.id);
+    if (!check.allowed) return res.status(403).json({ error: check.reason });
+
     const created = await Attendance.bulkCreate(records);
     res.status(201).json({ message: 'Mahudhurio yamesajiliwa.', created });
   } catch (err) {
@@ -28,10 +53,13 @@ router.post('/attendance', async (req, res) => {
 });
 
 // Weka alama (bulk)
-// Mfano wa body: { marks: [{ studentId: 1, subject: 'Hisabati', score: 78, term: 'Term 2 2026' }, ...] }
+// Mfano wa body: { className: 'Darasa la 5', marks: [{ studentId: 1, subject: 'Hisabati', score: 78, term: 'Term 2 2026' }, ...] }
 router.post('/marks', async (req, res) => {
   try {
-    const { marks } = req.body;
+    const { className, marks } = req.body;
+    const check = await verifyClassOwnership(className, req.user.id);
+    if (!check.allowed) return res.status(403).json({ error: check.reason });
+
     const created = await Marks.bulkCreate(marks);
     res.status(201).json({ message: 'Alama zimewekwa.', created });
   } catch (err) {
@@ -43,6 +71,9 @@ router.post('/marks', async (req, res) => {
 router.post('/homework', async (req, res) => {
   try {
     const { title, description, className, subject, deadline } = req.body;
+    const check = await verifyClassOwnership(className, req.user.id);
+    if (!check.allowed) return res.status(403).json({ error: check.reason });
+
     const homework = await Homework.create({
       title, description, className, subject, deadline,
       teacherId: req.user.id,
@@ -57,10 +88,17 @@ router.post('/homework', async (req, res) => {
 router.post('/announcements', async (req, res) => {
   try {
     const { title, message, className } = req.body;
+
+    // Kama darasa limetajwa, hakikisha ni darasa lake
+    if (className) {
+      const check = await verifyClassOwnership(className, req.user.id);
+      if (!check.allowed) return res.status(403).json({ error: check.reason });
+    }
+
     const announcement = await Announcement.create({
       title, message, className,
       targetRole: 'parent',
-      status: 'pending', // Mkuu ndiye ata-approve
+      status: 'pending',
       createdBy: req.user.id,
     });
     res.status(201).json({ message: 'Tangazo limetumwa, linasubiri approval ya Mkuu wa Shule.', announcement });

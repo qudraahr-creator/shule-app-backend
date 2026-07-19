@@ -6,7 +6,56 @@ const Student = require('../models/Student');
 const Fee = require('../models/Fee');
 const Announcement = require('../models/Announcement');
 
+const ClassAssignment = require('../models/ClassAssignment');
+
 router.use(authenticate, authorize('head_teacher'));
+
+// Teua mwalimu wa darasa (mwalimu mmoja tu kwa kila darasa)
+router.post('/class-assignments', async (req, res) => {
+  try {
+    const { className, teacherId } = req.body;
+    if (!className || !teacherId) {
+      return res.status(400).json({ error: 'Weka darasa na mwalimu.' });
+    }
+
+    // Hakikisha teacherId ni mwalimu halisi
+    const teacher = await User.findByPk(teacherId);
+    if (!teacher || teacher.role !== 'teacher') {
+      return res.status(400).json({ error: 'Mtumiaji huyu si mwalimu.' });
+    }
+
+    // Kama darasa hili tayari lina mwalimu, badilisha (siyo kuongeza mpya)
+    const existing = await ClassAssignment.findOne({ where: { className } });
+    if (existing) {
+      await ClassAssignment.update({ teacherId }, { where: { className } });
+      return res.json({ message: `Mwalimu wa ${className} amebadilishwa.` });
+    }
+
+    const assignment = await ClassAssignment.create({ className, teacherId });
+    res.status(201).json(assignment);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Ona uteuzi wote wa walimu wa madarasa
+router.get('/class-assignments', async (req, res) => {
+  const assignments = await ClassAssignment.findAll();
+  const users = await User.findAll();
+
+  const enriched = assignments.map((a) => {
+    const teacher = users.find((u) => u.id === a.teacherId);
+    return { ...a, teacherName: teacher ? teacher.fullName : 'Haijulikani' };
+  });
+
+  res.json(enriched);
+});
+
+// Ondoa uteuzi wa mwalimu wa darasa
+router.delete('/class-assignments/:id', async (req, res) => {
+  await ClassAssignment.destroy({ where: { id: Number(req.params.id) } });
+  res.json({ message: 'Uteuzi umeondolewa.' });
+});
 
 // Ona watumiaji wote (walimu/wazazi)
 router.get('/users', async (req, res) => {

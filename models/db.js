@@ -15,6 +15,7 @@ db.defaults({
   fees: [],
   homeworks: [],
   announcements: [],
+  classAssignments: [],
 }).write();
 
 function matchesWhere(item, where) {
