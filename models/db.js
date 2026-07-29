@@ -6,7 +6,6 @@ const file = path.join(__dirname, '../database.json');
 const adapter = new FileSync(file);
 const db = low(adapter);
 
-// Muundo wa awali wa database (kama tables)
 db.defaults({
   users: [],
   students: [],
@@ -17,6 +16,7 @@ db.defaults({
   announcements: [],
   classAssignments: [],
   messages: [],
+  leaveRequests: [],
 }).write();
 
 function matchesWhere(item, where) {
@@ -31,8 +31,6 @@ function omitFields(item, excludeFields) {
   return copy;
 }
 
-// "Model" inayoiga tabia ya Sequelize (create, findAll, findOne, findByPk, update, destroy, bulkCreate)
-// ili routes zilizoandikwa awali ziendelee kufanya kazi bila kubadilika
 function Model(collection) {
   return {
     create: (data) => {

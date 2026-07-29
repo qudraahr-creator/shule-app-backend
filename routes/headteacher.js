@@ -9,7 +9,7 @@ const Announcement = require('../models/Announcement');
 const ClassAssignment = require('../models/ClassAssignment');
 const sendPushNotification = require('../utils/sendPushNotification');
 
-router.use(authenticate, authorize('head_teacher'));
+router.use(authenticate, authorize('head_teacher', 'deputy_head_teacher'));
 
 // Teua mwalimu wa darasa (mwalimu mmoja tu kwa kila darasa)
 router.post('/class-assignments', async (req, res) => {
@@ -64,8 +64,11 @@ router.get('/users', async (req, res) => {
   res.json(users);
 });
 
-// Ondoa mtumiaji
+// Ondoa mtumiaji (Mkuu wa Shule pekee - siyo Makamu)
 router.delete('/users/:id', async (req, res) => {
+  if (req.user.role !== 'head_teacher') {
+    return res.status(403).json({ error: 'Ni Mkuu wa Shule pekee anayeweza kuondoa watumiaji.' });
+  }
   await User.destroy({ where: { id: req.params.id } });
   res.json({ message: 'Mtumiaji ameondolewa.' });
 });

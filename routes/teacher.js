@@ -7,6 +7,8 @@ const Marks = require('../models/Marks');
 const Homework = require('../models/Homework');
 const Announcement = require('../models/Announcement');
 const ClassAssignment = require('../models/ClassAssignment');
+const LeaveRequest = require('../models/LeaveRequest');
+const User = require('../models/User');
 
 router.use(authenticate, authorize('teacher'));
 
@@ -108,3 +110,43 @@ router.post('/announcements', async (req, res) => {
 });
 
 module.exports = router;
+
+// ==== LEAVE REQUESTS (Ruhusa) - Mwalimu anaidhinisha kwa darasa lake ====
+
+// Ona ombi za ruhusa za wanafunzi wa madarasa yangu
+router.get('/leave-requests', async (req, res) => {
+  try {
+    const myAssignments = await ClassAssignment.findAll({ where: { teacherId: req.user.id } });
+    const myClassNames = myAssignments.map((a) => a.className);
+
+    const students = await Student.findAll();
+    const myStudentIds = students
+      .filter((s) => myClassNames.includes(s.className))
+      .map((s) => s.id);
+
+    const allRequests = await LeaveRequest.findAll();
+    const relevantRequests = allRequests
+      .filter((r) => myStudentIds.includes(r.studentId))
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    const enriched = relevantRequests.map((r) => {
+      const student = students.find((s) => s.id === r.studentId);
+      return { ...r, studentName: student ? student.fullName : 'Haijulikani', className: student ? student.className : '' };
+    });
+
+    res.json(enriched);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Idhinisha au kataa ombi la ruhusa
+router.put('/leave-requests/:id/status', async (req, res) => {
+  try {
+    const { status } = req.body; // 'approved' | 'rejected'
+    await LeaveRequest.update({ status }, { where: { id: Number(req.params.id) } });
+    res.json({ message: `Ombi limekuwa ${status}.` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});

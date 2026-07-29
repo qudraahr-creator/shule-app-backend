@@ -44,7 +44,7 @@ router.get('/messages/contacts', async (req, res) => {
         students.filter((s) => myClassNames.includes(s.className) && s.parentId).map((s) => s.parentId)
       )];
       contacts = users.filter((u) => parentIds.includes(u.id));
-    } else if (req.user.role === 'head_teacher') {
+    } else if (req.user.role === 'head_teacher' || req.user.role === 'deputy_head_teacher') {
       // Mkuu anaweza kuongea na kila mtu
       contacts = users.filter((u) => u.id !== req.user.id);
     }
