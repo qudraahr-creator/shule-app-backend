@@ -24,13 +24,11 @@ async function verifyClassOwnership(className, teacherId) {
   return { allowed: true };
 }
 
-// Ona darasa/madarasa niliyoteuliwa (kwa ajili ya frontend kuonyesha chaguo)
 router.get('/my-classes', async (req, res) => {
   const assignments = await ClassAssignment.findAll({ where: { teacherId: req.user.id } });
   res.json(assignments.map((a) => a.className));
 });
 
-// Ona wanafunzi wa darasa fulani
 router.get('/class/:className/students', async (req, res) => {
   const check = await verifyClassOwnership(req.params.className, req.user.id);
   if (!check.allowed) return res.status(403).json({ error: check.reason });
@@ -39,8 +37,6 @@ router.get('/class/:className/students', async (req, res) => {
   res.json(students);
 });
 
-// Sajili mahudhurio (bulk kwa darasa zima)
-// Mfano wa body: { className: 'Darasa la 5', records: [{ studentId: 1, date: '2026-07-17', status: 'present' }, ...] }
 router.post('/attendance', async (req, res) => {
   try {
     const { className, records } = req.body;
@@ -50,12 +46,11 @@ router.post('/attendance', async (req, res) => {
     const created = await Attendance.bulkCreate(records);
     res.status(201).json({ message: 'Mahudhurio yamesajiliwa.', created });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Kuna tatizo la ndani, jaribu tena baadaye.' });
   }
 });
 
-// Weka alama (bulk)
-// Mfano wa body: { className: 'Darasa la 5', marks: [{ studentId: 1, subject: 'Hisabati', score: 78, term: 'Term 2 2026' }, ...] }
 router.post('/marks', async (req, res) => {
   try {
     const { className, marks } = req.body;
@@ -65,11 +60,11 @@ router.post('/marks', async (req, res) => {
     const created = await Marks.bulkCreate(marks);
     res.status(201).json({ message: 'Alama zimewekwa.', created });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Kuna tatizo la ndani, jaribu tena baadaye.' });
   }
 });
 
-// Weka homework/assignment
 router.post('/homework', async (req, res) => {
   try {
     const { title, description, className, subject, deadline } = req.body;
@@ -82,16 +77,15 @@ router.post('/homework', async (req, res) => {
     });
     res.status(201).json(homework);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Kuna tatizo la ndani, jaribu tena baadaye.' });
   }
 });
 
-// Tuma tangazo kwa darasa maalum (inasubiri approval ya Mkuu)
 router.post('/announcements', async (req, res) => {
   try {
     const { title, message, className } = req.body;
 
-    // Kama darasa limetajwa, hakikisha ni darasa lake
     if (className) {
       const check = await verifyClassOwnership(className, req.user.id);
       if (!check.allowed) return res.status(403).json({ error: check.reason });
@@ -105,15 +99,13 @@ router.post('/announcements', async (req, res) => {
     });
     res.status(201).json({ message: 'Tangazo limetumwa, linasubiri approval ya Mkuu wa Shule.', announcement });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Kuna tatizo la ndani, jaribu tena baadaye.' });
   }
 });
 
-module.exports = router;
-
 // ==== LEAVE REQUESTS (Ruhusa) - Mwalimu anaidhinisha kwa darasa lake ====
 
-// Ona ombi za ruhusa za wanafunzi wa madarasa yangu
 router.get('/leave-requests', async (req, res) => {
   try {
     const myAssignments = await ClassAssignment.findAll({ where: { teacherId: req.user.id } });
@@ -136,17 +128,39 @@ router.get('/leave-requests', async (req, res) => {
 
     res.json(enriched);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Kuna tatizo la ndani, jaribu tena baadaye.' });
   }
 });
 
-// Idhinisha au kataa ombi la ruhusa
 router.put('/leave-requests/:id/status', async (req, res) => {
   try {
-    const { status } = req.body; // 'approved' | 'rejected'
+    const { status } = req.body;
+    if (!['approved', 'rejected'].includes(status)) {
+      return res.status(400).json({ error: 'Status si sahihi.' });
+    }
+
+    const leaveRequest = await LeaveRequest.findByPk(req.params.id);
+    if (!leaveRequest) {
+      return res.status(404).json({ error: 'Ombi halijapatikana.' });
+    }
+
+    const student = await Student.findByPk(leaveRequest.studentId);
+    if (!student) {
+      return res.status(404).json({ error: 'Mwanafunzi hajapatikana.' });
+    }
+
+    const check = await verifyClassOwnership(student.className, req.user.id);
+    if (!check.allowed) {
+      return res.status(403).json({ error: 'Huyu si mwanafunzi wa darasa lako.' });
+    }
+
     await LeaveRequest.update({ status }, { where: { id: Number(req.params.id) } });
     res.json({ message: `Ombi limekuwa ${status}.` });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Kuna tatizo la ndani, jaribu tena baadaye.' });
   }
 });
+
+module.exports = router;
