@@ -9,10 +9,15 @@ const Homework = require('../models/Homework');
 const Announcement = require('../models/Announcement');
 const LeaveRequest = require('../models/LeaveRequest');
 
-// Zuia routes zote hapa chini kwa role 'parent' pekee
 router.use(authenticate, authorize('parent'));
 
-// Omba ruhusa (sick leave / early pickup) kwa niaba ya mtoto
+// Helper: hakikisha mtoto huyu ni wa mzazi aliye-login
+async function verifyOwnChild(studentId, parentId) {
+  const student = await Student.findByPk(studentId);
+  if (!student || student.parentId !== parentId) return null;
+  return student;
+}
+
 router.post('/leave-requests', async (req, res) => {
   try {
     const { studentId, type, reason, date } = req.body;
@@ -20,8 +25,8 @@ router.post('/leave-requests', async (req, res) => {
       return res.status(400).json({ error: 'Weka mtoto, aina ya ruhusa, na tarehe.' });
     }
 
-    const student = await Student.findByPk(studentId);
-    if (!student || student.parentId !== req.user.id) {
+    const student = await verifyOwnChild(studentId, req.user.id);
+    if (!student) {
       return res.status(403).json({ error: 'Huyu si mtoto wako.' });
     }
 
@@ -36,11 +41,11 @@ router.post('/leave-requests', async (req, res) => {
 
     res.status(201).json(leaveRequest);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Kuna tatizo la ndani, jaribu tena baadaye.' });
   }
 });
 
-// Ona ombi zangu za ruhusa (kwa watoto wangu wote)
 router.get('/leave-requests', async (req, res) => {
   const children = await Student.findAll({ where: { parentId: req.user.id } });
   const childIds = children.map((c) => c.id);
@@ -58,7 +63,6 @@ router.get('/leave-requests', async (req, res) => {
   res.json(enriched);
 });
 
-// Tafuta mwanafunzi kwa jina/darasa (kwa ajili ya kujiunganisha na mtoto)
 router.get('/search-students', async (req, res) => {
   try {
     const { name, className } = req.query;
@@ -79,14 +83,14 @@ router.get('/search-students', async (req, res) => {
       linked: !!s.parentId,
     })));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Kuna tatizo la ndani, jaribu tena baadaye.' });
   }
 });
 
-// Jiunganishe na mtoto wako (endapo bado hajaunganishwa na mzazi yeyote)
 router.post('/link-child', async (req, res) => {
   try {
-    const { studentId } = req.body;
+    const { studentId, admissionNumber } = req.body;
     const student = await Student.findByPk(studentId);
 
     if (!student) {
@@ -97,30 +101,37 @@ router.post('/link-child', async (req, res) => {
         error: 'Mwanafunzi huyu tayari ameunganishwa na mzazi mwingine. Wasiliana na Mkuu wa Shule.',
       });
     }
+    // Uthibitisho wa ziada: admission number lazima ilingane
+    if (!admissionNumber || student.admissionNumber !== admissionNumber) {
+      return res.status(403).json({ error: 'Namba ya usajili (admission number) si sahihi.' });
+    }
 
     await Student.update({ parentId: req.user.id }, { where: { id: studentId } });
     res.json({ message: 'Umeunganishwa na mtoto wako kikamilifu!' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Kuna tatizo la ndani, jaribu tena baadaye.' });
   }
 });
 
-// Ona watoto wote wa mzazi huyu
 router.get('/children', async (req, res) => {
   const children = await Student.findAll({ where: { parentId: req.user.id } });
   res.json(children);
 });
 
-// Ona matokeo ya mtoto fulani
 router.get('/children/:studentId/marks', async (req, res) => {
+  const student = await verifyOwnChild(req.params.studentId, req.user.id);
+  if (!student) return res.status(403).json({ error: 'Huyu si mtoto wako.' });
+
   const marks = await Marks.findAll({ where: { studentId: req.params.studentId } });
   res.json(marks);
 });
 
-// Ona mahudhurio ya mtoto
 router.get('/children/:studentId/attendance', async (req, res) => {
-  const records = await Attendance.findAll({ where: { studentId: req.params.studentId } });
+  const student = await verifyOwnChild(req.params.studentId, req.user.id);
+  if (!student) return res.status(403).json({ error: 'Huyu si mtoto wako.' });
 
+  const records = await Attendance.findAll({ where: { studentId: req.params.studentId } });
   const total = records.length;
   const present = records.filter(r => r.status === 'present').length;
   const percentage = total > 0 ? ((present / total) * 100).toFixed(1) : 0;
@@ -128,22 +139,22 @@ router.get('/children/:studentId/attendance', async (req, res) => {
   res.json({ records, percentage: `${percentage}%` });
 });
 
-// Ona ada ya mtoto
 router.get('/children/:studentId/fees', async (req, res) => {
+  const student = await verifyOwnChild(req.params.studentId, req.user.id);
+  if (!student) return res.status(403).json({ error: 'Huyu si mtoto wako.' });
+
   const fees = await Fee.findAll({ where: { studentId: req.params.studentId } });
   res.json(fees);
 });
 
-// Ona homework kwa darasa la mtoto
 router.get('/children/:studentId/homework', async (req, res) => {
-  const student = await Student.findByPk(req.params.studentId);
-  if (!student) return res.status(404).json({ error: 'Mwanafunzi hajapatikana' });
+  const student = await verifyOwnChild(req.params.studentId, req.user.id);
+  if (!student) return res.status(403).json({ error: 'Huyu si mtoto wako.' });
 
   const homework = await Homework.findAll({ where: { className: student.className } });
   res.json(homework);
 });
 
-// Ona matangazo
 router.get('/announcements', async (req, res) => {
   const announcements = await Announcement.findAll({
     where: { status: 'approved' },
