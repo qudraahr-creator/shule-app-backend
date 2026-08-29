@@ -41,7 +41,6 @@ function Model(collection) {
       db.write();
       return record;
     },
-
     bulkCreate: (records) => {
       const items = db.get(collection).value();
       let id = items.reduce((m, i) => Math.max(m, i.id || 0), 0);
@@ -50,7 +49,6 @@ function Model(collection) {
       db.write();
       return created;
     },
-
     findAll: (query = {}) => {
       let items = db.get(collection).value();
       if (query.where) items = items.filter((i) => matchesWhere(i, query.where));
@@ -67,30 +65,31 @@ function Model(collection) {
       }
       return items;
     },
-
     findOne: (query = {}) => {
       const items = db.get(collection).value().filter((i) => matchesWhere(i, query.where));
       return items[0] || null;
     },
-
     findByPk: (id) => {
       const items = db.get(collection).value();
       return items.find((i) => i.id === Number(id)) || null;
     },
-
     update: (data, query) => {
       const items = db.get(collection).value();
       items.filter((i) => matchesWhere(i, query.where)).forEach((i) => Object.assign(i, data));
       db.write();
       return true;
     },
-
     destroy: (query) => {
       const items = db.get(collection).value();
       const remaining = items.filter((i) => !matchesWhere(i, query.where));
       const removedCount = items.length - remaining.length;
       db.set(collection, remaining).write();
       return removedCount;
+    },
+    count: (query = {}) => {
+      let items = db.get(collection).value();
+      if (query.where) items = items.filter((i) => matchesWhere(i, query.where));
+      return items.length;
     },
   };
 }

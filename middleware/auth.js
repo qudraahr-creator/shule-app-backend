@@ -1,7 +1,6 @@
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
-// Hakiki kama mtumiaji ame-login (ana token sahihi)
 function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -18,7 +17,6 @@ function authenticate(req, res, next) {
   }
 }
 
-// Hakiki kama mtumiaji ana role sahihi (parent/teacher/head_teacher)
 function authorize(...allowedRoles) {
   return (req, res, next) => {
     if (!allowedRoles.includes(req.user.role)) {

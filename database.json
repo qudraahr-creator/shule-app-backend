@@ -14,5 +14,8 @@
   "marks": [],
   "fees": [],
   "homeworks": [],
-  "announcements": []
+  "announcements": [],
+  "classAssignments": [],
+  "messages": [],
+  "leaveRequests": []
 }

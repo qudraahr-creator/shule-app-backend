@@ -8,11 +8,12 @@ const Homework = require('../models/Homework');
 const Announcement = require('../models/Announcement');
 const ClassAssignment = require('../models/ClassAssignment');
 const LeaveRequest = require('../models/LeaveRequest');
-const User = require('../models/User');
 
 router.use(authenticate, authorize('teacher'));
 
-// Hakikisha mwalimu huyu ndiye aliyeteuliwa kwa darasa hili
+// USALAMA: kila kitendo kinachohusu darasa fulani kinathibitisha kwanza
+// kwamba huyu mwalimu ndiye ALIYETEULIWA rasmi kwa darasa hilo (na Mkuu wa Shule),
+// kabla ya kumruhusu kuona au kubadilisha taarifa za wanafunzi wa darasa hilo.
 async function verifyClassOwnership(className, teacherId) {
   const assignment = await ClassAssignment.findOne({ where: { className } });
   if (!assignment) {
@@ -43,11 +44,20 @@ router.post('/attendance', async (req, res) => {
     const check = await verifyClassOwnership(className, req.user.id);
     if (!check.allowed) return res.status(403).json({ error: check.reason });
 
+    // USALAMA: hakikisha kila studentId kwenye records ni wa darasa hili hili
+    // (siyo tu kuamini data itakayotumwa na client)
+    const classStudents = await Student.findAll({ where: { className } });
+    const validStudentIds = classStudents.map((s) => s.id);
+    const invalidRecord = records.find((r) => !validStudentIds.includes(Number(r.studentId)));
+    if (invalidRecord) {
+      return res.status(400).json({ error: 'Baadhi ya wanafunzi hawapo kwenye darasa hili.' });
+    }
+
     const created = await Attendance.bulkCreate(records);
     res.status(201).json({ message: 'Mahudhurio yamesajiliwa.', created });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Kuna tatizo la ndani, jaribu tena baadaye.' });
+    console.error('Attendance error:', err.message);
+    res.status(500).json({ error: 'Hitilafu ya ndani ya server.' });
   }
 });
 
@@ -57,11 +67,18 @@ router.post('/marks', async (req, res) => {
     const check = await verifyClassOwnership(className, req.user.id);
     if (!check.allowed) return res.status(403).json({ error: check.reason });
 
+    const classStudents = await Student.findAll({ where: { className } });
+    const validStudentIds = classStudents.map((s) => s.id);
+    const invalidMark = marks.find((m) => !validStudentIds.includes(Number(m.studentId)));
+    if (invalidMark) {
+      return res.status(400).json({ error: 'Baadhi ya wanafunzi hawapo kwenye darasa hili.' });
+    }
+
     const created = await Marks.bulkCreate(marks);
     res.status(201).json({ message: 'Alama zimewekwa.', created });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Kuna tatizo la ndani, jaribu tena baadaye.' });
+    console.error('Marks error:', err.message);
+    res.status(500).json({ error: 'Hitilafu ya ndani ya server.' });
   }
 });
 
@@ -77,8 +94,8 @@ router.post('/homework', async (req, res) => {
     });
     res.status(201).json(homework);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Kuna tatizo la ndani, jaribu tena baadaye.' });
+    console.error('Homework error:', err.message);
+    res.status(500).json({ error: 'Hitilafu ya ndani ya server.' });
   }
 });
 
@@ -99,12 +116,12 @@ router.post('/announcements', async (req, res) => {
     });
     res.status(201).json({ message: 'Tangazo limetumwa, linasubiri approval ya Mkuu wa Shule.', announcement });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Kuna tatizo la ndani, jaribu tena baadaye.' });
+    console.error('Announcement error:', err.message);
+    res.status(500).json({ error: 'Hitilafu ya ndani ya server.' });
   }
 });
 
-// ==== LEAVE REQUESTS (Ruhusa) - Mwalimu anaidhinisha kwa darasa lake ====
+// ==== LEAVE REQUESTS - Mwalimu anaidhinisha kwa darasa lake tu ====
 
 router.get('/leave-requests', async (req, res) => {
   try {
@@ -128,38 +145,29 @@ router.get('/leave-requests', async (req, res) => {
 
     res.json(enriched);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Kuna tatizo la ndani, jaribu tena baadaye.' });
+    console.error('Leave requests error:', err.message);
+    res.status(500).json({ error: 'Hitilafu ya ndani ya server.' });
   }
 });
 
 router.put('/leave-requests/:id/status', async (req, res) => {
   try {
     const { status } = req.body;
-    if (!['approved', 'rejected'].includes(status)) {
-      return res.status(400).json({ error: 'Status si sahihi.' });
-    }
-
     const leaveRequest = await LeaveRequest.findByPk(req.params.id);
-    if (!leaveRequest) {
-      return res.status(404).json({ error: 'Ombi halijapatikana.' });
-    }
+    if (!leaveRequest) return res.status(404).json({ error: 'Ombi halijapatikana.' });
 
+    // USALAMA: hakikisha ombi hili ni la mwanafunzi wa darasa analolisimamia huyu mwalimu
     const student = await Student.findByPk(leaveRequest.studentId);
-    if (!student) {
-      return res.status(404).json({ error: 'Mwanafunzi hajapatikana.' });
-    }
-
-    const check = await verifyClassOwnership(student.className, req.user.id);
-    if (!check.allowed) {
-      return res.status(403).json({ error: 'Huyu si mwanafunzi wa darasa lako.' });
+    if (student) {
+      const check = await verifyClassOwnership(student.className, req.user.id);
+      if (!check.allowed) return res.status(403).json({ error: check.reason });
     }
 
     await LeaveRequest.update({ status }, { where: { id: Number(req.params.id) } });
     res.json({ message: `Ombi limekuwa ${status}.` });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Kuna tatizo la ndani, jaribu tena baadaye.' });
+    console.error('Leave status error:', err.message);
+    res.status(500).json({ error: 'Hitilafu ya ndani ya server.' });
   }
 });
 

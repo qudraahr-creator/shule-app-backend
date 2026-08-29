@@ -7,27 +7,25 @@ const ClassAssignment = require('../models/ClassAssignment');
 const Message = require('../models/Message');
 const sendPushNotification = require('../utils/sendPushNotification');
 
-router.use(authenticate); // role yoyote iliyo-login inaweza kutumia hizi routes
+router.use(authenticate);
 
-// Sajili push token ya mtumiaji (baada ya login)
 router.post('/push/register', async (req, res) => {
   try {
     const { pushToken } = req.body;
     await User.update({ pushToken }, { where: { id: req.user.id } });
     res.json({ message: 'Push token imesajiliwa.' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Push register error:', err.message);
+    res.status(500).json({ error: 'Hitilafu ya ndani ya server.' });
   }
 });
 
-// Ona watu ninaoweza kuwasiliana nao (kutegemea role)
 router.get('/messages/contacts', async (req, res) => {
   try {
     const users = await User.findAll();
     let contacts = [];
 
     if (req.user.role === 'parent') {
-      // Mzazi anaongea na walimu wa madarasa ya watoto wake
       const children = await Student.findAll({ where: { parentId: req.user.id } });
       const classNames = [...new Set(children.map((c) => c.className))];
       const assignments = await ClassAssignment.findAll();
@@ -36,7 +34,6 @@ router.get('/messages/contacts', async (req, res) => {
         .map((a) => a.teacherId);
       contacts = users.filter((u) => teacherIds.includes(u.id));
     } else if (req.user.role === 'teacher') {
-      // Mwalimu anaongea na wazazi wa wanafunzi wa darasa lake
       const myAssignments = await ClassAssignment.findAll({ where: { teacherId: req.user.id } });
       const myClassNames = myAssignments.map((a) => a.className);
       const students = await Student.findAll();
@@ -45,17 +42,16 @@ router.get('/messages/contacts', async (req, res) => {
       )];
       contacts = users.filter((u) => parentIds.includes(u.id));
     } else if (req.user.role === 'head_teacher' || req.user.role === 'deputy_head_teacher') {
-      // Mkuu anaweza kuongea na kila mtu
       contacts = users.filter((u) => u.id !== req.user.id);
     }
 
     res.json(contacts.map((c) => ({ id: c.id, fullName: c.fullName, role: c.role })));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Contacts error:', err.message);
+    res.status(500).json({ error: 'Hitilafu ya ndani ya server.' });
   }
 });
 
-// Ona mazungumzo yote (conversations) yenye ujumbe wa mwisho
 router.get('/messages/conversations', async (req, res) => {
   try {
     const allMessages = await Message.findAll();
@@ -88,11 +84,12 @@ router.get('/messages/conversations', async (req, res) => {
 
     res.json(conversations);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Conversations error:', err.message);
+    res.status(500).json({ error: 'Hitilafu ya ndani ya server.' });
   }
 });
 
-// Ona ujumbe wote kati yangu na mtu fulani
+// USALAMA: mtu anaweza kuona TU thread ambayo yeye ni sender au receiver
 router.get('/messages/:partnerId', async (req, res) => {
   try {
     const partnerId = Number(req.params.partnerId);
@@ -105,16 +102,15 @@ router.get('/messages/:partnerId', async (req, res) => {
       )
       .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
-    // Weka alama "read" kwa ujumbe niliopokea
     await Message.update({ read: true }, { where: { senderId: partnerId, receiverId: req.user.id } });
 
     res.json(thread);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Thread error:', err.message);
+    res.status(500).json({ error: 'Hitilafu ya ndani ya server.' });
   }
 });
 
-// Tuma ujumbe mpya
 router.post('/messages', async (req, res) => {
   try {
     const { receiverId, content } = req.body;
@@ -129,7 +125,6 @@ router.post('/messages', async (req, res) => {
       read: false,
     });
 
-    // Tuma push notification kwa mpokeaji
     const receiver = await User.findByPk(receiverId);
     const sender = await User.findByPk(req.user.id);
     if (receiver?.pushToken) {
@@ -143,7 +138,8 @@ router.post('/messages', async (req, res) => {
 
     res.status(201).json(message);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Send message error:', err.message);
+    res.status(500).json({ error: 'Hitilafu ya ndani ya server.' });
   }
 });
 
