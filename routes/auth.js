@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 const User = require('../models/User');
+const { sendOtpEmail } = require('../utils/sendEmail');
 
 // Zuia majaribio mengi ya login/register kutoka IP moja (brute-force protection)
 const authLimiter = rateLimit({
@@ -112,3 +113,81 @@ router.post('/login', authLimiter, async (req, res) => {
 });
 
 module.exports = router;
+
+// ==== FORGOT PASSWORD (kwa Gmail) ====
+
+function generateOtp() {
+  return Math.floor(100000 + Math.random() * 900000).toString(); // namba 6 za nasibu
+}
+
+// Hatua 1: Tuma OTP kwa Gmail ya mtumiaji
+router.post('/forgot-password', authLimiter, async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: 'Weka barua pepe.' });
+    }
+
+    const user = await User.findOne({ where: { email } });
+
+    // USALAMA: hatuambii kama email ipo au haipo, ili kuzuia "account enumeration"
+    if (!user) {
+      return res.json({ message: 'Kama email hii ipo kwenye mfumo wetu, msimbo umetumwa.' });
+    }
+
+    const otp = generateOtp();
+    const otpExpiry = Date.now() + 10 * 60 * 1000; // dakika 10
+
+    await User.update({ resetOtp: otp, resetOtpExpiry: otpExpiry }, { where: { id: user.id } });
+
+    try {
+      await sendOtpEmail(user.email, otp, user.fullName);
+    } catch (emailErr) {
+      console.error('Email send error:', emailErr.message);
+      return res.status(500).json({ error: 'Imeshindwa kutuma barua pepe. Jaribu tena baadaye.' });
+    }
+
+    res.json({ message: 'Kama email hii ipo kwenye mfumo wetu, msimbo umetumwa.' });
+  } catch (err) {
+    console.error('Forgot password error:', err.message);
+    res.status(500).json({ error: 'Hitilafu ya ndani ya server.' });
+  }
+});
+
+// Hatua 2: Thibitisha OTP na weka nywila mpya
+router.post('/reset-password', authLimiter, async (req, res) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+    if (!email || !otp || !newPassword) {
+      return res.status(400).json({ error: 'Jaza taarifa zote.' });
+    }
+
+    if (newPassword.length < 6 || !/[a-zA-Z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+      return res.status(400).json({ error: 'Nywila mpya iwe na angalau herufi 6, ichanganye herufi na namba.' });
+    }
+
+    const user = await User.findOne({ where: { email } });
+    if (!user || !user.resetOtp) {
+      return res.status(400).json({ error: 'Ombi la kubadilisha nywila halipo au limeisha muda.' });
+    }
+
+    if (Date.now() > user.resetOtpExpiry) {
+      return res.status(400).json({ error: 'Msimbo umeisha muda. Omba msimbo mpya.' });
+    }
+
+    if (user.resetOtp !== otp) {
+      return res.status(400).json({ error: 'Msimbo si sahihi.' });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await User.update(
+      { password: hashedPassword, resetOtp: null, resetOtpExpiry: null },
+      { where: { id: user.id } }
+    );
+
+    res.json({ message: 'Nywila imebadilishwa kikamilifu! Sasa unaweza kuingia.' });
+  } catch (err) {
+    console.error('Reset password error:', err.message);
+    res.status(500).json({ error: 'Hitilafu ya ndani ya server.' });
+  }
+});
