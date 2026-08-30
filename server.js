@@ -12,6 +12,10 @@ const messagesRoutes = require('./routes/messages');
 
 const app = express();
 
+// MUHIMU: Render inatumia reverse proxy, tunahitaji kuiambia Express iamini
+// header ya X-Forwarded-For ili express-rate-limit ipate IP sahihi ya mtumiaji.
+app.set('trust proxy', 1);
+
 app.use(helmet()); // usalama wa msingi wa HTTP headers
 app.use(cors()); // TODO: kabla ya production halisi, punguza 'origin' kwa domain maalum
 

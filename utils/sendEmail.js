@@ -1,12 +1,20 @@
 const nodemailer = require('nodemailer');
 require('dotenv').config();
 
+// Tunatumia mipangilio ya wazi (siyo shorthand 'service: gmail') na muda mrefu zaidi
+// wa kusubiri, kwa sababu baadhi ya seva za bure (kama Render) zinachukua muda
+// kuanzisha muunganiko wa SMTP mara ya kwanza.
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 465,
+  secure: true, // true kwa port 465 (SSL)
   auth: {
-    user: process.env.EMAIL_USER, // mfano: shuleappmail@gmail.com
-    pass: process.env.EMAIL_PASS, // Gmail App Password (herufi 16, bila nafasi)
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
   },
+  connectionTimeout: 20000, // sekunde 20 badala ya default (mara nyingi sekunde 10 hazitoshi Render)
+  greetingTimeout: 20000,
+  socketTimeout: 20000,
 });
 
 async function sendOtpEmail(toEmail, otp, fullName) {
