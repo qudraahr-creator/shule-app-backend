@@ -5,21 +5,29 @@ const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 const User = require('../models/User');
+const School = require('../models/School');
 const { sendOtpEmail } = require('../utils/sendEmail');
 
-// Zuia majaribio mengi ya login/register kutoka IP moja (brute-force protection)
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // dakika 15
-  max: 10, // majaribio 10 tu kwa dakika 15 kwa kila IP
+  windowMs: 15 * 60 * 1000,
+  max: 10,
   message: { error: 'Majaribio mengi sana. Tafadhali subiri kidogo kabla ya kujaribu tena.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
 
+function validatePasswordStrength(password) {
+  if (password.length < 6) return 'Nywila lazima iwe na angalau herufi 6.';
+  if (!/[a-zA-Z]/.test(password)) return 'Nywila lazima iwe na angalau herufi moja (a-z).';
+  if (!/[0-9]/.test(password)) return 'Nywila lazima iwe na angalau namba moja (0-9).';
+  return null;
+}
+
 // SAJILI MTUMIAJI MPYA
-// USALAMA: Usajili wa umma unaruhusu 'parent' PEKEE.
-// 'teacher' na 'deputy_head_teacher' huundwa na Mkuu wa Shule (ona routes/headteacher.js -> /staff).
-// 'head_teacher' inaruhusiwa tu mara moja (bootstrap) kama hakuna head_teacher yeyote bado kwenye mfumo.
+// USALAMA + MULTI-SCHOOL:
+// - 'parent': anahitaji schoolCode ya shule ambayo tayari ipo mfumoni.
+// - 'head_teacher': anaunda SHULE MPYA (schoolName + schoolCode ya kipekee) na kuwa Mkuu wake.
+// - 'teacher'/'deputy_head_teacher': HAWAWEZI kujisajili humu - huundwa na Mkuu wa Shule (/head/staff).
 router.post('/register', authLimiter, async (req, res) => {
   try {
     const { fullName, email, phone, password, role } = req.body;
@@ -28,27 +36,9 @@ router.post('/register', authLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Tafadhali jaza taarifa zote muhimu.' });
     }
 
-    if (password.length < 6 || !/[a-zA-Z]/.test(password) || !/[0-9]/.test(password)) {
-      return res.status(400).json({ error: 'Nywila iwe na angalau herufi 6, ichanganye herufi na namba.' });
-    }
-
-    let finalRole = role;
-
-    if (role === 'parent') {
-      finalRole = 'parent';
-    } else if (role === 'head_teacher') {
-      const existingHeadTeacher = await User.findOne({ where: { role: 'head_teacher' } });
-      if (existingHeadTeacher) {
-        return res.status(403).json({
-          error: 'Tayari kuna Mkuu wa Shule aliyesajiliwa. Wasiliana naye kupata akaunti ya Mwalimu au Makamu.',
-        });
-      }
-      finalRole = 'head_teacher';
-    } else {
-      // 'teacher', 'deputy_head_teacher', au role yoyote isiyo ruhusiwa hadharani
-      return res.status(403).json({
-        error: 'Aina hii ya akaunti haiwezi kujisajili moja kwa moja. Wasiliana na Mkuu wa Shule.',
-      });
+    const passwordError = validatePasswordStrength(password);
+    if (passwordError) {
+      return res.status(400).json({ error: passwordError });
     }
 
     const existing = await User.findOne({ where: { email } });
@@ -56,23 +46,63 @@ router.post('/register', authLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Email hii tayari imesajiliwa.' });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    let schoolId = null;
 
+    if (role === 'parent') {
+      const { schoolCode } = req.body;
+      if (!schoolCode) {
+        return res.status(400).json({ error: 'Weka Msimbo wa Shule (School Code) uliopewa na shule.' });
+      }
+      const school = await School.findOne({ where: { code: schoolCode.trim().toUpperCase() } });
+      if (!school) {
+        return res.status(400).json({ error: 'Msimbo wa Shule si sahihi.' });
+      }
+      if (school.status === 'suspended') {
+        return res.status(403).json({ error: 'Shule hii imesimamishwa kwa sasa. Wasiliana na uongozi.' });
+      }
+      schoolId = school.id;
+    } else if (role === 'head_teacher') {
+      const { schoolName, schoolCode } = req.body;
+      if (!schoolName || !schoolCode) {
+        return res.status(400).json({ error: 'Weka jina la shule na Msimbo wa Shule (schoolCode) wa kipekee.' });
+      }
+      const normalizedCode = schoolCode.trim().toUpperCase();
+      const existingSchool = await School.findOne({ where: { code: normalizedCode } });
+      if (existingSchool) {
+        return res.status(400).json({ error: 'Msimbo huu wa shule tayari unatumika. Chagua mwingine.' });
+      }
+      const school = await School.create({
+        name: schoolName,
+        code: normalizedCode,
+        status: 'active',
+      });
+      schoolId = school.id;
+    } else if (role === 'super_admin') {
+      const existingSuperAdmin = await User.findOne({ where: { role: 'super_admin' } });
+      if (existingSuperAdmin) {
+        return res.status(403).json({ error: 'Tayari kuna Super Admin aliyesajiliwa.' });
+      }
+      schoolId = null; // Super Admin hana shule maalum - anaona zote
+    } else {
+      return res.status(403).json({
+        error: 'Aina hii ya akaunti haiwezi kujisajili moja kwa moja. Wasiliana na Mkuu wa Shule.',
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
     const user = await User.create({
-      fullName,
-      email,
-      phone,
-      password: hashedPassword,
-      role: finalRole,
+      fullName, email, phone, password: hashedPassword, role, schoolId,
     });
 
     res.status(201).json({
-      message: 'Umesajiliwa kikamilifu!',
-      user: { id: user.id, fullName: user.fullName, email: user.email, role: user.role },
+      message: role === 'head_teacher'
+        ? 'Shule na akaunti yako vimeundwa kikamilifu!'
+        : 'Umesajiliwa kikamilifu!',
+      user: { id: user.id, fullName: user.fullName, email: user.email, role: user.role, schoolId: user.schoolId },
     });
   } catch (err) {
     console.error('Register error:', err.message);
-    res.status(500).json({ error: 'Hitilafu ya ndani ya server. Jaribu tena baadaye.' });
+    res.status(500).json({ error: 'Hitilafu ya ndani ya server.' });
   }
 });
 
@@ -80,7 +110,6 @@ router.post('/register', authLimiter, async (req, res) => {
 router.post('/login', authLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
-
     if (!email || !password) {
       return res.status(400).json({ error: 'Weka email na password.' });
     }
@@ -95,8 +124,16 @@ router.post('/login', authLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Email au password si sahihi.' });
     }
 
+    // Kama mtumiaji ana shule (siyo super_admin), hakikisha shule haijasimamishwa
+    if (user.schoolId) {
+      const school = await School.findByPk(user.schoolId);
+      if (school && school.status === 'suspended') {
+        return res.status(403).json({ error: 'Shule yako imesimamishwa kwa sasa. Wasiliana na msimamizi.' });
+      }
+    }
+
     const token = jwt.sign(
-      { id: user.id, role: user.role, email: user.email },
+      { id: user.id, role: user.role, email: user.email, schoolId: user.schoolId || null },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -104,40 +141,35 @@ router.post('/login', authLimiter, async (req, res) => {
     res.json({
       message: 'Umeingia kikamilifu!',
       token,
-      user: { id: user.id, fullName: user.fullName, email: user.email, role: user.role },
+      user: {
+        id: user.id, fullName: user.fullName, email: user.email,
+        role: user.role, schoolId: user.schoolId || null,
+      },
     });
   } catch (err) {
     console.error('Login error:', err.message);
-    res.status(500).json({ error: 'Hitilafu ya ndani ya server. Jaribu tena baadaye.' });
+    res.status(500).json({ error: 'Hitilafu ya ndani ya server.' });
   }
 });
 
-module.exports = router;
-
-// ==== FORGOT PASSWORD (kwa Gmail) ====
+// ==== FORGOT PASSWORD ====
 
 function generateOtp() {
-  return Math.floor(100000 + Math.random() * 900000).toString(); // namba 6 za nasibu
+  return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-// Hatua 1: Tuma OTP kwa Gmail ya mtumiaji
 router.post('/forgot-password', authLimiter, async (req, res) => {
   try {
     const { email } = req.body;
-    if (!email) {
-      return res.status(400).json({ error: 'Weka barua pepe.' });
-    }
+    if (!email) return res.status(400).json({ error: 'Weka barua pepe.' });
 
     const user = await User.findOne({ where: { email } });
-
-    // USALAMA: hatuambii kama email ipo au haipo, ili kuzuia "account enumeration"
     if (!user) {
       return res.json({ message: 'Kama email hii ipo kwenye mfumo wetu, msimbo umetumwa.' });
     }
 
     const otp = generateOtp();
-    const otpExpiry = Date.now() + 10 * 60 * 1000; // dakika 10
-
+    const otpExpiry = Date.now() + 10 * 60 * 1000;
     await User.update({ resetOtp: otp, resetOtpExpiry: otpExpiry }, { where: { id: user.id } });
 
     try {
@@ -154,7 +186,6 @@ router.post('/forgot-password', authLimiter, async (req, res) => {
   }
 });
 
-// Hatua 2: Thibitisha OTP na weka nywila mpya
 router.post('/reset-password', authLimiter, async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
@@ -162,19 +193,16 @@ router.post('/reset-password', authLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Jaza taarifa zote.' });
     }
 
-    if (newPassword.length < 6 || !/[a-zA-Z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
-      return res.status(400).json({ error: 'Nywila mpya iwe na angalau herufi 6, ichanganye herufi na namba.' });
-    }
+    const passwordError = validatePasswordStrength(newPassword);
+    if (passwordError) return res.status(400).json({ error: passwordError });
 
     const user = await User.findOne({ where: { email } });
     if (!user || !user.resetOtp) {
       return res.status(400).json({ error: 'Ombi la kubadilisha nywila halipo au limeisha muda.' });
     }
-
     if (Date.now() > user.resetOtpExpiry) {
       return res.status(400).json({ error: 'Msimbo umeisha muda. Omba msimbo mpya.' });
     }
-
     if (user.resetOtp !== otp) {
       return res.status(400).json({ error: 'Msimbo si sahihi.' });
     }
@@ -191,3 +219,5 @@ router.post('/reset-password', authLimiter, async (req, res) => {
     res.status(500).json({ error: 'Hitilafu ya ndani ya server.' });
   }
 });
+
+module.exports = router;

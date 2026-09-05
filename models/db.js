@@ -7,6 +7,7 @@ const adapter = new FileSync(file);
 const db = low(adapter);
 
 db.defaults({
+  schools: [],
   users: [],
   students: [],
   attendances: [],

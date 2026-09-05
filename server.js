@@ -9,6 +9,7 @@ const parentRoutes = require('./routes/parent');
 const teacherRoutes = require('./routes/teacher');
 const headTeacherRoutes = require('./routes/headteacher');
 const messagesRoutes = require('./routes/messages');
+const superAdminRoutes = require('./routes/superadmin');
 
 const app = express();
 
@@ -38,6 +39,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/parent', parentRoutes);
 app.use('/api/teacher', teacherRoutes);
 app.use('/api/head', headTeacherRoutes);
+app.use('/api/super', superAdminRoutes);
 app.use('/api', messagesRoutes);
 
 // Generic error handler ya mwisho (haitoi error details kwa mtumiaji)

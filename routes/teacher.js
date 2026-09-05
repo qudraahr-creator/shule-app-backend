@@ -11,11 +11,8 @@ const LeaveRequest = require('../models/LeaveRequest');
 
 router.use(authenticate, authorize('teacher'));
 
-// USALAMA: kila kitendo kinachohusu darasa fulani kinathibitisha kwanza
-// kwamba huyu mwalimu ndiye ALIYETEULIWA rasmi kwa darasa hilo (na Mkuu wa Shule),
-// kabla ya kumruhusu kuona au kubadilisha taarifa za wanafunzi wa darasa hilo.
-async function verifyClassOwnership(className, teacherId) {
-  const assignment = await ClassAssignment.findOne({ where: { className } });
+async function verifyClassOwnership(className, teacherId, schoolId) {
+  const assignment = await ClassAssignment.findOne({ where: { className, schoolId } });
   if (!assignment) {
     return { allowed: false, reason: 'Darasa hili halijapewa mwalimu bado. Mwombe Mkuu wa Shule akuteue.' };
   }
@@ -26,32 +23,28 @@ async function verifyClassOwnership(className, teacherId) {
 }
 
 router.get('/my-classes', async (req, res) => {
-  const assignments = await ClassAssignment.findAll({ where: { teacherId: req.user.id } });
+  const assignments = await ClassAssignment.findAll({ where: { teacherId: req.user.id, schoolId: req.user.schoolId } });
   res.json(assignments.map((a) => a.className));
 });
 
 router.get('/class/:className/students', async (req, res) => {
-  const check = await verifyClassOwnership(req.params.className, req.user.id);
+  const check = await verifyClassOwnership(req.params.className, req.user.id, req.user.schoolId);
   if (!check.allowed) return res.status(403).json({ error: check.reason });
 
-  const students = await Student.findAll({ where: { className: req.params.className } });
+  const students = await Student.findAll({ where: { className: req.params.className, schoolId: req.user.schoolId } });
   res.json(students);
 });
 
 router.post('/attendance', async (req, res) => {
   try {
     const { className, records } = req.body;
-    const check = await verifyClassOwnership(className, req.user.id);
+    const check = await verifyClassOwnership(className, req.user.id, req.user.schoolId);
     if (!check.allowed) return res.status(403).json({ error: check.reason });
 
-    // USALAMA: hakikisha kila studentId kwenye records ni wa darasa hili hili
-    // (siyo tu kuamini data itakayotumwa na client)
-    const classStudents = await Student.findAll({ where: { className } });
+    const classStudents = await Student.findAll({ where: { className, schoolId: req.user.schoolId } });
     const validStudentIds = classStudents.map((s) => s.id);
     const invalidRecord = records.find((r) => !validStudentIds.includes(Number(r.studentId)));
-    if (invalidRecord) {
-      return res.status(400).json({ error: 'Baadhi ya wanafunzi hawapo kwenye darasa hili.' });
-    }
+    if (invalidRecord) return res.status(400).json({ error: 'Baadhi ya wanafunzi hawapo kwenye darasa hili.' });
 
     const created = await Attendance.bulkCreate(records);
     res.status(201).json({ message: 'Mahudhurio yamesajiliwa.', created });
@@ -64,15 +57,13 @@ router.post('/attendance', async (req, res) => {
 router.post('/marks', async (req, res) => {
   try {
     const { className, marks } = req.body;
-    const check = await verifyClassOwnership(className, req.user.id);
+    const check = await verifyClassOwnership(className, req.user.id, req.user.schoolId);
     if (!check.allowed) return res.status(403).json({ error: check.reason });
 
-    const classStudents = await Student.findAll({ where: { className } });
+    const classStudents = await Student.findAll({ where: { className, schoolId: req.user.schoolId } });
     const validStudentIds = classStudents.map((s) => s.id);
     const invalidMark = marks.find((m) => !validStudentIds.includes(Number(m.studentId)));
-    if (invalidMark) {
-      return res.status(400).json({ error: 'Baadhi ya wanafunzi hawapo kwenye darasa hili.' });
-    }
+    if (invalidMark) return res.status(400).json({ error: 'Baadhi ya wanafunzi hawapo kwenye darasa hili.' });
 
     const created = await Marks.bulkCreate(marks);
     res.status(201).json({ message: 'Alama zimewekwa.', created });
@@ -85,12 +76,12 @@ router.post('/marks', async (req, res) => {
 router.post('/homework', async (req, res) => {
   try {
     const { title, description, className, subject, deadline } = req.body;
-    const check = await verifyClassOwnership(className, req.user.id);
+    const check = await verifyClassOwnership(className, req.user.id, req.user.schoolId);
     if (!check.allowed) return res.status(403).json({ error: check.reason });
 
     const homework = await Homework.create({
       title, description, className, subject, deadline,
-      teacherId: req.user.id,
+      teacherId: req.user.id, schoolId: req.user.schoolId,
     });
     res.status(201).json(homework);
   } catch (err) {
@@ -102,17 +93,13 @@ router.post('/homework', async (req, res) => {
 router.post('/announcements', async (req, res) => {
   try {
     const { title, message, className } = req.body;
-
     if (className) {
-      const check = await verifyClassOwnership(className, req.user.id);
+      const check = await verifyClassOwnership(className, req.user.id, req.user.schoolId);
       if (!check.allowed) return res.status(403).json({ error: check.reason });
     }
-
     const announcement = await Announcement.create({
-      title, message, className,
-      targetRole: 'parent',
-      status: 'pending',
-      createdBy: req.user.id,
+      title, message, className, targetRole: 'parent', status: 'pending',
+      createdBy: req.user.id, schoolId: req.user.schoolId,
     });
     res.status(201).json({ message: 'Tangazo limetumwa, linasubiri approval ya Mkuu wa Shule.', announcement });
   } catch (err) {
@@ -121,17 +108,13 @@ router.post('/announcements', async (req, res) => {
   }
 });
 
-// ==== LEAVE REQUESTS - Mwalimu anaidhinisha kwa darasa lake tu ====
-
 router.get('/leave-requests', async (req, res) => {
   try {
-    const myAssignments = await ClassAssignment.findAll({ where: { teacherId: req.user.id } });
+    const myAssignments = await ClassAssignment.findAll({ where: { teacherId: req.user.id, schoolId: req.user.schoolId } });
     const myClassNames = myAssignments.map((a) => a.className);
 
-    const students = await Student.findAll();
-    const myStudentIds = students
-      .filter((s) => myClassNames.includes(s.className))
-      .map((s) => s.id);
+    const students = await Student.findAll({ where: { schoolId: req.user.schoolId } });
+    const myStudentIds = students.filter((s) => myClassNames.includes(s.className)).map((s) => s.id);
 
     const allRequests = await LeaveRequest.findAll();
     const relevantRequests = allRequests
@@ -142,7 +125,6 @@ router.get('/leave-requests', async (req, res) => {
       const student = students.find((s) => s.id === r.studentId);
       return { ...r, studentName: student ? student.fullName : 'Haijulikani', className: student ? student.className : '' };
     });
-
     res.json(enriched);
   } catch (err) {
     console.error('Leave requests error:', err.message);
@@ -156,12 +138,12 @@ router.put('/leave-requests/:id/status', async (req, res) => {
     const leaveRequest = await LeaveRequest.findByPk(req.params.id);
     if (!leaveRequest) return res.status(404).json({ error: 'Ombi halijapatikana.' });
 
-    // USALAMA: hakikisha ombi hili ni la mwanafunzi wa darasa analolisimamia huyu mwalimu
     const student = await Student.findByPk(leaveRequest.studentId);
-    if (student) {
-      const check = await verifyClassOwnership(student.className, req.user.id);
-      if (!check.allowed) return res.status(403).json({ error: check.reason });
+    if (!student || student.schoolId !== req.user.schoolId) {
+      return res.status(404).json({ error: 'Ombi halijapatikana kwenye shule yako.' });
     }
+    const check = await verifyClassOwnership(student.className, req.user.id, req.user.schoolId);
+    if (!check.allowed) return res.status(403).json({ error: check.reason });
 
     await LeaveRequest.update({ status }, { where: { id: Number(req.params.id) } });
     res.json({ message: `Ombi limekuwa ${status}.` });

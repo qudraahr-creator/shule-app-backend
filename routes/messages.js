@@ -22,21 +22,19 @@ router.post('/push/register', async (req, res) => {
 
 router.get('/messages/contacts', async (req, res) => {
   try {
-    const users = await User.findAll();
+    const users = await User.findAll({ where: { schoolId: req.user.schoolId } });
     let contacts = [];
 
     if (req.user.role === 'parent') {
-      const children = await Student.findAll({ where: { parentId: req.user.id } });
+      const children = await Student.findAll({ where: { parentId: req.user.id, schoolId: req.user.schoolId } });
       const classNames = [...new Set(children.map((c) => c.className))];
-      const assignments = await ClassAssignment.findAll();
-      const teacherIds = assignments
-        .filter((a) => classNames.includes(a.className))
-        .map((a) => a.teacherId);
+      const assignments = await ClassAssignment.findAll({ where: { schoolId: req.user.schoolId } });
+      const teacherIds = assignments.filter((a) => classNames.includes(a.className)).map((a) => a.teacherId);
       contacts = users.filter((u) => teacherIds.includes(u.id));
     } else if (req.user.role === 'teacher') {
-      const myAssignments = await ClassAssignment.findAll({ where: { teacherId: req.user.id } });
+      const myAssignments = await ClassAssignment.findAll({ where: { teacherId: req.user.id, schoolId: req.user.schoolId } });
       const myClassNames = myAssignments.map((a) => a.className);
-      const students = await Student.findAll();
+      const students = await Student.findAll({ where: { schoolId: req.user.schoolId } });
       const parentIds = [...new Set(
         students.filter((s) => myClassNames.includes(s.className) && s.parentId).map((s) => s.parentId)
       )];
@@ -55,32 +53,26 @@ router.get('/messages/contacts', async (req, res) => {
 router.get('/messages/conversations', async (req, res) => {
   try {
     const allMessages = await Message.findAll();
-    const myMessages = allMessages.filter(
-      (m) => m.senderId === req.user.id || m.receiverId === req.user.id
-    );
+    const myMessages = allMessages.filter((m) => m.senderId === req.user.id || m.receiverId === req.user.id);
+    const partnerIds = [...new Set(myMessages.map((m) => (m.senderId === req.user.id ? m.receiverId : m.senderId)))];
 
-    const partnerIds = [...new Set(
-      myMessages.map((m) => (m.senderId === req.user.id ? m.receiverId : m.senderId))
-    )];
-
-    const users = await User.findAll();
-    const conversations = partnerIds.map((partnerId) => {
-      const partner = users.find((u) => u.id === partnerId);
-      const thread = myMessages
-        .filter((m) => m.senderId === partnerId || m.receiverId === partnerId)
-        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-      const lastMessage = thread[0];
-      const unreadCount = thread.filter((m) => m.receiverId === req.user.id && !m.read).length;
-
-      return {
-        partnerId,
-        partnerName: partner ? partner.fullName : 'Haijulikani',
-        partnerRole: partner ? partner.role : '',
-        lastMessage: lastMessage ? lastMessage.content : '',
-        lastMessageAt: lastMessage ? lastMessage.createdAt : null,
-        unreadCount,
-      };
-    }).sort((a, b) => new Date(b.lastMessageAt) - new Date(a.lastMessageAt));
+    const users = await User.findAll({ where: { schoolId: req.user.schoolId } });
+    const conversations = partnerIds
+      .filter((partnerId) => users.some((u) => u.id === partnerId)) // USALAMA: partner lazima awe wa shule hii hii
+      .map((partnerId) => {
+        const partner = users.find((u) => u.id === partnerId);
+        const thread = myMessages
+          .filter((m) => m.senderId === partnerId || m.receiverId === partnerId)
+          .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        const lastMessage = thread[0];
+        const unreadCount = thread.filter((m) => m.receiverId === req.user.id && !m.read).length;
+        return {
+          partnerId, partnerName: partner.fullName, partnerRole: partner.role,
+          lastMessage: lastMessage ? lastMessage.content : '',
+          lastMessageAt: lastMessage ? lastMessage.createdAt : null,
+          unreadCount,
+        };
+      }).sort((a, b) => new Date(b.lastMessageAt) - new Date(a.lastMessageAt));
 
     res.json(conversations);
   } catch (err) {
@@ -89,21 +81,24 @@ router.get('/messages/conversations', async (req, res) => {
   }
 });
 
-// USALAMA: mtu anaweza kuona TU thread ambayo yeye ni sender au receiver
 router.get('/messages/:partnerId', async (req, res) => {
   try {
     const partnerId = Number(req.params.partnerId);
+
+    // USALAMA: partner lazima awe wa shule hii hii
+    const partner = await User.findByPk(partnerId);
+    if (!partner || partner.schoolId !== req.user.schoolId) {
+      return res.status(403).json({ error: 'Huwezi kuongea na mtumiaji huyu.' });
+    }
+
     const allMessages = await Message.findAll();
     const thread = allMessages
-      .filter(
-        (m) =>
-          (m.senderId === req.user.id && m.receiverId === partnerId) ||
-          (m.senderId === partnerId && m.receiverId === req.user.id)
-      )
+      .filter((m) =>
+        (m.senderId === req.user.id && m.receiverId === partnerId) ||
+        (m.senderId === partnerId && m.receiverId === req.user.id))
       .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
     await Message.update({ read: true }, { where: { senderId: partnerId, receiverId: req.user.id } });
-
     res.json(thread);
   } catch (err) {
     console.error('Thread error:', err.message);
@@ -114,26 +109,18 @@ router.get('/messages/:partnerId', async (req, res) => {
 router.post('/messages', async (req, res) => {
   try {
     const { receiverId, content } = req.body;
-    if (!receiverId || !content) {
-      return res.status(400).json({ error: 'Weka mpokeaji na ujumbe.' });
-    }
-
-    const message = await Message.create({
-      senderId: req.user.id,
-      receiverId: Number(receiverId),
-      content,
-      read: false,
-    });
+    if (!receiverId || !content) return res.status(400).json({ error: 'Weka mpokeaji na ujumbe.' });
 
     const receiver = await User.findByPk(receiverId);
+    if (!receiver || receiver.schoolId !== req.user.schoolId) {
+      return res.status(403).json({ error: 'Huwezi kutuma ujumbe kwa mtumiaji huyu.' });
+    }
+
+    const message = await Message.create({ senderId: req.user.id, receiverId: Number(receiverId), content, read: false });
+
     const sender = await User.findByPk(req.user.id);
-    if (receiver?.pushToken) {
-      sendPushNotification(
-        receiver.pushToken,
-        `Ujumbe kutoka kwa ${sender.fullName}`,
-        content,
-        { type: 'message', senderId: req.user.id }
-      );
+    if (receiver.pushToken) {
+      sendPushNotification(receiver.pushToken, `Ujumbe kutoka kwa ${sender.fullName}`, content, { type: 'message', senderId: req.user.id });
     }
 
     res.status(201).json(message);
